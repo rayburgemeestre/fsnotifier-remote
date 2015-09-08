@@ -1,0 +1,84 @@
+#!/bin/ksh93
+# When running you can use:
+# - kill -SIGINT $(cat /tmp/fsnotifier.pid) - pause all activity between the real fsnotifier running over ssh and this script.
+# - kill -SIGHUP $(cat /tmp/fsnotifier.pid) - continue all activity between the real fsnotifier running over ssh and this script.
+# Note that any activity that occurs between executing these two commands is not buffered and will never reach the Jetbrains editor.
+# This feature can be especially useful if you mount over NFS and you do a make clean / rebuild of your C++ source tree, which
+#  could lead into a LOT of I/O. In my case almost a gigabyte of data that's being rm -rf 'd and rebuild.
+
+typeset HIDE_OUTPUT=0
+typeset DEBUG=false
+typeset NOBUFFER="stdbuf -i0 -o0 -e0"
+typeset START_BUFFERING=false
+
+function custom_filter
+{
+    typeset -n return_val=$1
+    typeset cmd=$2  # i.e., DELETE/CREATE/CHANGE/...
+    typeset file=$3 # i.e., /full/path/to/file
+
+    # Ignore some files that are not interesting to my IDE
+    if [[ $file =~ (cmd|mm)\.log$ ]] || \
+       [[ $file =~ deps.*\.d$ ]]         || \
+       [[ $file =~ \.o$ ]]            || \
+       [[ $file =~ \.o\. ]]            || \
+       [[ $file =~ \.html$ ]]         || \
+       [[ $file =~ core\.*([0-9])$ ]];
+    then 
+        return_val=false
+        return
+    fi
+
+    return_val=true
+    return
+}
+
+function filter_function
+{
+    trap 'HIDE_OUTPUT=1' INT 
+    trap 'HIDE_OUTPUT=0' HUP
+
+    typeset cmd=""
+
+    while read line; do
+        if [[ $START_BUFFERING = false ]]; then
+            print $line # first pass through everything, or the IDE will hang
+            if [[ $line =~ ^# ]]; then
+                START_BUFFERING=true # it's okay to start buffering COMMAND\nFILE\n ...
+            fi
+            continue
+        fi
+      
+        if [[ $line =~ ^\/ ]]; then # line begins with forward slash (/)
+            typeset return_val=false
+            custom_filter return_val "$cmd" "$line" 
+            if [[ $return_val = true ]]; then
+                if [[ $HIDE_OUTPUT -eq 0 ]]; then # if not paused by user
+                    echo $cmd
+                    echo $line
+                fi;
+                if [[ $DEBUG ]]; then echo $cmd - $line >> /tmp/fsnotifier-included.log; fi
+            else
+                if [[ $DEBUG ]]; then echo $cmd - $line >> /tmp/fsnotifier-filtered.log; fi
+            fi
+            if [[ $DEBUG ]]; then echo $cmd - $line >> /tmp/fsnotifier-combined.log; fi
+        fi
+        cmd="$line"
+    done < /dev/stdin
+}
+
+function filter_wrapper
+{
+    while true; do 
+        # necessary to run this in a loop because when trapping signals, the current function (filter_function)
+        # will be terminated, this will simply restart it after it handled the signal.
+        filter_function
+    done
+}
+
+echo $$ > /tmp/fsnotifier.pid
+
+ssh -T -l ray dev11 /home/ray/projects/fsnotifier-remote/linux/fsnotifier64 | filter_wrapper
+
+rm -rf /tmp/fsnotifier-included.log 2>/dev/null
+rm -rf /tmp/fsnotifier-filtered.pid 2>/dev/null

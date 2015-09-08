@@ -1,0 +1,32 @@
+
+In order to filter out sequence that start with DELETE you could use:
+
+    DELETE /foo/bar.xml
+    CREATE /foo/bar.xml
+    CHANGE /foo/bar.xml
+
+Combined with the following filter:
+
+    typeset previous_file=false
+    function custom_filter
+    {
+        typeset -n return_val=$1
+        typeset cmd=$2  # i.e., DELETE/CREATE/CHANGE/...
+        typeset file=$3 # i.e., /full/path/to/file
+    
+        # I noticed a lot of DELETE <file>\nCREATE <file>\nCHANGE <file>\n during compiling.
+        # I want to ignore those combinations...
+        if ! [[ $previous_file = false ]] && [[ $file = $previous_file ]]; then
+            return_val=false
+            return
+        fi
+        previous_file=false
+        if [[ $cmd = "DELETE" ]]; then
+            previous_file="$file"
+            return_val=false
+            return
+        fi
+    
+        return_val=true
+        return
+    }
