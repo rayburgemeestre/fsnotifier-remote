@@ -6,10 +6,26 @@
 # This feature can be especially useful if you mount over NFS and you do a make clean / rebuild of your C++ source tree, which
 #  could lead into a LOT of I/O. In my case almost a gigabyte of data that's being rm -rf 'd and rebuild.
 
+typeset FSNOTIFIER="ssh -T -l ray dev11 /home/ray/projects/fsnotifier-remote/linux/fsnotifier64"
 typeset HIDE_OUTPUT=0
 typeset DEBUG=false
 typeset NOBUFFER="stdbuf -i0 -o0 -e0"
 typeset START_BUFFERING=false
+
+typeset -a peek_three_lines
+typeset counter=0
+while true; do
+    read line
+    peek_three_lines[$counter]=$line
+    # for certain projects, do not go over ssh
+    if [[ $line =~ starcry ]]; then
+        FSNOTIFIER=/apps/clion-2016.1/bin/fsnotifier
+    fi
+    if [[ "$line" == "#" ]]; then
+        break
+    fi
+    counter=$((counter + 1))
+done
 
 function custom_filter
 {
@@ -17,13 +33,19 @@ function custom_filter
     typeset cmd=$2  # i.e., DELETE/CREATE/CHANGE/...
     typeset file=$3 # i.e., /full/path/to/file
 
+    # Ignore DELETE's for generated files, I don't want my IDE to remove them from the index
+    # (If files are actually removed I will purge it myself)
+    if [[ $cmd = "DELETE" ]] && [[ $file =~ *generated* ]] then
+        return_val=false
+        return
+
     # Ignore some files that are not interesting to my IDE
-    if [[ $file =~ (cmd|mm)\.log$ ]] || \
-       [[ $file =~ deps.*\.d$ ]]         || \
-       [[ $file =~ \.o$ ]]            || \
-       [[ $file =~ \.o\. ]]            || \
-       [[ $file =~ \.html$ ]]         || \
-       [[ $file =~ core\.*([0-9])$ ]];
+    elif [[ $file =~ (cmd|mm)\.log$ ]] || \
+         [[ $file =~ deps.*\.d$ ]]         || \
+         [[ $file =~ \.o$ ]]            || \
+         [[ $file =~ \.o\. ]]            || \
+         [[ $file =~ \.html$ ]]         || \
+         [[ $file =~ core\.*([0-9])$ ]];
     then 
         return_val=false
         return
@@ -62,8 +84,16 @@ function filter_function
                 if [[ $DEBUG ]]; then echo $cmd - $line >> /tmp/fsnotifier-filtered.log; fi
             fi
             if [[ $DEBUG ]]; then echo $cmd - $line >> /tmp/fsnotifier-combined.log; fi
+        elif [[ $line =~ ^\# ]]; then
+            echo $cmd
+            echo $line
         fi
         cmd="$line"
+        #echo debug cmd= $cmd >> /tmp/fsnotifier-debug;
+        #if [[ $cmd = "ROOTS" ]]; then
+        #    echo debug cmd= $cmd YES >> /tmp/fsnotifier-debug;
+        #    START_BUFFERING=false
+        #fi
     done < /dev/stdin
 }
 
@@ -78,7 +108,17 @@ function filter_wrapper
 
 echo $$ > /tmp/fsnotifier.pid
 
-ssh -T -l ray dev11 /home/ray/projects/fsnotifier-remote/linux/fsnotifier64 | filter_wrapper
+# with filtering
+#$FSNOTIFIER | filter_wrapper
+
+# without filtering
+(
+    for line in ${peek_three_lines[@]}; do
+        echo $line
+    done
+    cat /dev/stdin
+    echo DONE
+) | tee -a /tmp/ray.log | $FSNOTIFIER | tee -a /tmp/ray.out
 
 rm -rf /tmp/fsnotifier-included.log 2>/dev/null
 rm -rf /tmp/fsnotifier-filtered.pid 2>/dev/null
