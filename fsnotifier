@@ -6,7 +6,7 @@
 # This feature can be especially useful if you mount over NFS and you do a make clean / rebuild of your C++ source tree, which
 #  could lead into a LOT of I/O. In my case almost a gigabyte of data that's being rm -rf 'd and rebuild.
 
-typeset FSNOTIFIER="ssh -T -l ray dev11 /home/ray/projects/fsnotifier-remote/linux/fsnotifier64"
+typeset FSNOTIFIER="ssh -T -l ray dev6 /home/ray/projects/fsnotifier-remote/linux/fsnotifier64"
 typeset HIDE_OUTPUT=0
 typeset DEBUG=false
 typeset NOBUFFER="stdbuf -i0 -o0 -e0"
@@ -19,6 +19,9 @@ while true; do
     peek_three_lines[$counter]=$line
     # for certain projects, do not go over ssh
     if [[ $line =~ starcry ]]; then
+        FSNOTIFIER=/apps/clion-2016.1/bin/fsnotifier
+    fi
+    if [[ $line =~ processfighter ]]; then
         FSNOTIFIER=/apps/clion-2016.1/bin/fsnotifier
     fi
     if [[ "$line" == "#" ]]; then
